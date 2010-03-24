@@ -38,7 +38,9 @@ object FileTasks
 {
 	implicit def wrapProduct(product: => Path): ProductsWrapper = wrapProducts(product :: Nil)
 	implicit def wrapProducts(productsList: => Iterable[Path]): ProductsWrapper =
-		new ProductsWrapper
+  {
+    require(!productsList.isEmpty, "No products were specified; products must be known in advance.")
+    new ProductsWrapper
 		{
 			def from(sourceFinder: PathFinder) =
 				new ProductsSources
@@ -47,7 +49,8 @@ object FileTasks
 					def sources = sourceFinder.get
 				}
 		}
-	/** Runs 'ifOutofdate' if the given products are out of date with respect to the given sources.*/
+  }
+  /** Runs 'ifOutofdate' if the given products are out of date with respect to the given sources.*/
 	def runOption(label: String, files: ProductsSources, log: Logger)(ifOutofdate: => Option[String]): Option[String] =
 	{
 		val result = apply[Option[String]](label, files, log)(ifOutofdate)(None)

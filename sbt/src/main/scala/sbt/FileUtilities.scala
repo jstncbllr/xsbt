@@ -57,7 +57,7 @@ object FileUtilities
 			new Preserved(readOnly(pathMap), tmp)
 		}
 	}
-	
+
 	/** Gzips the file 'in' and writes it to 'out'.  'in' cannot be the same file as 'out'. */
 	def gzip(in: Path, out: Path, log: Logger): Option[String] =
 	{
@@ -84,7 +84,7 @@ object FileUtilities
 			}
 		}
 	}
-	
+
 	/** Creates a jar file.
 	* @param sources The files to include in the jar file.  The path used for the jar is
 	* relative to the base directory for the source.  That is, the path in the jar for source
@@ -108,7 +108,7 @@ object FileUtilities
 	* @param log The Logger to use. */
 	def zip(sources: Iterable[Path], outputZip: Path, recursive: Boolean, log: Logger) =
 		archive(sources, outputZip, None, recursive, log)
-	
+
 	private def archive(sources: Iterable[Path], outputPath: Path, manifest: Option[Manifest], recursive: Boolean, log: Logger) =
 	{
 		log.info("Packaging " + outputPath + " ...")
@@ -129,7 +129,7 @@ object FileUtilities
 			result
 		}
 	}
-	
+
 	private def writeZip(sources: Iterable[Path], output: ZipOutputStream, recursive: Boolean, log: Logger)(createEntry: String => ZipEntry) =
 	{
 		def add(source: Path)
@@ -156,7 +156,7 @@ object FileUtilities
 		sources.foreach(add)
 		None
 	}
-	
+
 	private def withZipOutput(file: File, manifest: Option[Manifest], log: Logger)(f: ZipOutputStream => Option[String]): Option[String] =
 	{
 		writeStream(file, log)
@@ -194,7 +194,7 @@ object FileUtilities
 	/** Unzips the contents of the zip file <code>from</code> to the <code>toDirectory</code> directory.*/
 	def unzip(from: URL, toDirectory: Path, log: Logger): Either[String, Set[Path]] =
 		unzip(from, toDirectory, AllPassFilter, log)
-	
+
 	/** Unzips the contents of the zip file <code>from</code> to the <code>toDirectory</code> directory.
 	* Only the entries that match the given filter are extracted. */
 	def unzip(from: Path, toDirectory: Path, filter: NameFilter, log: Logger): Either[String, Set[Path]] =
@@ -255,7 +255,7 @@ object FileUtilities
 		}
 		next().toLeft(readOnly(set))
 	}
-	
+
 	/** Copies all bytes from the given input stream to the given output stream.
 	* Neither stream is closed.*/
 	def transfer(in: InputStream, out: OutputStream, log: Logger): Option[String] =
@@ -293,15 +293,18 @@ object FileUtilities
 		Control.trapUnit("Could not create file " + file + ": ", log)
 		{
 			if(file.exists)
-			{
-				def updateFailBase = "Could not update last modified for file " + file
-				Control.trapUnit(updateFailBase + ": ", log)
-					{ if(file.setLastModified(System.currentTimeMillis)) None else Some(updateFailBase) }
-			}
+        touchExisting(file, System.currentTimeMillis, log)
 			else
 				createDirectory(file.getParentFile, log) orElse { file.createNewFile(); None }
 		}
 	}
+  /** Sets the last mod time on the given {@code file}, which must already exist */ 
+  private def touchExisting(file: File, time: Long, log: Logger): Option[String] =
+  {
+    def updateFailBase = "Could not update last modified for file " + file
+    Control.trapUnit(updateFailBase + ": ", log)
+      { if(file.setLastModified(time)) None else Some(updateFailBase) }
+  }
 	/** Creates a directory at the given location.*/
 	def createDirectory(dir: Path, log: Logger): Option[String] = createDirectory(dir.asFile, log)
 	/** Creates a directory at the given location.*/
@@ -346,7 +349,7 @@ object FileUtilities
 			{
 				val randomName = "sbt_" + java.lang.Integer.toHexString(random.nextInt)
 				val f = new File(temporaryDirectory, randomName)
-				
+
 				if(createDirectory(f, log).isEmpty)
 					Right(f)
 				else
@@ -380,7 +383,7 @@ object FileUtilities
 				{ file.delete() }
 		}
 	}
-	
+
 	/** Copies the files declared in <code>sources</code> to the <code>destinationDirectory</code>
 	* directory.  The source directory hierarchy is flattened so that all copies are immediate
 	* children of <code>destinationDirectory</code>.  Directories are not recursively entered.*/
@@ -435,18 +438,36 @@ object FileUtilities
 	def download(url: URL, to: File, log: Logger) =
 	{
 		readStream(url, log) { inputStream =>
-			writeStream(to, log) { outputStream => 
+			writeStream(to, log) { outputStream =>
 				transfer(inputStream, outputStream, log)
 			}
 		}
 	}
-	/** Copies the files declared in <code>sources</code> to the <code>destinationDirectory</code>
-	* directory.  Directories are not recursively entered.  The destination hierarchy matches the
-	* source paths relative to any base directories.  For example:
-	*
-	* A source <code>(basePath ##) / x / y</code> is copied to <code>destinationDirectory / x / y</code>.
-	* */
-	def copy(sources: Iterable[Path], destinationDirectory: Path, log: Logger) =
+
+  /**
+  * Equivalent to {@code copy(sources, destinationDirectory, false, log)}.
+  */
+	def copy(sources: Iterable[Path], destinationDirectory: Path, log: Logger): Either[String, Set[Path]] =
+    copy(sources, destinationDirectory, false, log)
+
+  /**
+  * Equivalent to {@code copy(sources, destinationDirectory, overwrite, false, log)}.
+  */
+	def copy(sources: Iterable[Path], destinationDirectory: Path, overwrite: Boolean, log: Logger): Either[String, Set[Path]] =
+    copy(sources, destinationDirectory, overwrite, false, log)
+
+  /** Copies the files declared in <code>sources</code> to the <code>destinationDirectory</code>
+  * directory.  Directories are not recursively entered.  The destination hierarchy matches the
+  * source paths relative to any base directories.  For example:
+  *
+  * A source <code>(basePath ##) / x / y</code> is copied to <code>destinationDirectory / x / y</code>.
+  *
+  * @param overwrite if true, existing destination files are always overwritten
+  * @param preserveLastModified if true, the last modified time of copied files will be set equal to
+  * their corresponding source files.
+  */
+	def copy(sources: Iterable[Path], destinationDirectory: Path,
+           overwrite: Boolean, preserveLastModified: Boolean, log: Logger): Either[String, Set[Path]] =
 	{
 		val targetSet = new scala.collection.mutable.HashSet[Path]
 		copyImpl(sources, destinationDirectory, log)
@@ -457,22 +478,27 @@ object FileUtilities
 				val toPath = Path.fromString(destinationDirectory, source.relativePath)
 				targetSet += toPath
 				val to = toPath.asFile
-				if(!to.exists || from.lastModified > to.lastModified)
+				if(!to.exists || overwrite || from.lastModified > to.lastModified)
 				{
-					if(from.isDirectory)
-						createDirectory(to, log)
-					else
-					{
-						log.debug("Copying " + source + " to " + toPath)
-						copyFile(from, to, log)
-					}
+          val result =
+            if(from.isDirectory)
+              createDirectory(to, log)
+            else
+            {
+              log.debug("Copying " + source + " to " + toPath)
+              copyFile(from, to, log)
+            }
+          if (result.isEmpty && preserveLastModified)
+            touchExisting(to, from.lastModified, log)
+          else
+            result
 				}
 				else
 					None
 			}
 		}.toLeft(readOnly(targetSet))
 	}
-	
+
 	/** Copies the files declared in <code>sources</code> to the <code>targetDirectory</code>
 	* directory.  The source directory hierarchy is flattened so that all copies are immediate
 	* children of <code>targetDirectory</code>.  Directories are not recursively entered.*/
@@ -513,7 +539,7 @@ object FileUtilities
 					}
 				case Nil => None
 			}
-		
+
 		Control.trap("Error copying files: ", log) { copyAll(uniquelyNamedSources.toList).toLeft(readOnly(targetSet)) }
 	}
 	/** Copies <code>sourceFile</code> to <code>targetFile</code>.  If <code>targetFile</code>
@@ -540,7 +566,7 @@ object FileUtilities
 			}
 		)
 	}
-	
+
 	/** Synchronizes the contents of the <code>sourceDirectory</code> directory to the
 	* <code>targetDirectory</code> directory.*/
 	def sync(sourceDirectory: Path, targetDirectory: Path, log: Logger): Option[String] =
@@ -559,7 +585,7 @@ object FileUtilities
 			toRemove.foreach(r => log.debug("Pruning " + r))
 		clean(toRemove, true, log)
 	}
-	
+
 	/** Copies the contents of the <code>source</code> directory to the <code>target</code> directory .*/
 	def copyDirectory(source: Path, target: Path, log: Logger): Option[String] =
 		copyDirectory(source.asFile, target.asFile, log)
@@ -586,7 +612,7 @@ object FileUtilities
 		copyDirectory(source, target)
 	}
 
-	
+
 	/** Deletes the given file recursively.*/
 	def clean(file: Path, log: Logger): Option[String] = clean(file :: Nil, log)
 	/** Deletes the given files recursively.*/
@@ -596,7 +622,7 @@ object FileUtilities
 	* If it is false, the <code>debug</code> level is used.*/
 	def clean(files: Iterable[Path], quiet: Boolean, log: Logger): Option[String] =
 		deleteFiles(files.map(_.asFile), quiet, log)
-			
+
 	private def deleteFiles(files: Iterable[File], quiet: Boolean, log: Logger): Option[String] =
 		((None: Option[String]) /: files)( (result, file) => result orElse delete(file, quiet, log))
 	private def delete(file: File, quiet: Boolean, log: Logger): Option[String] =
@@ -621,7 +647,7 @@ object FileUtilities
 			None
 		}
 	}
-	
+
 	/** Appends the given <code>String content</code> to the provided <code>file</code> using the default encoding.
 	* A new file is created if it does not exist.*/
 	def append(file: File, content: String, log: Logger): Option[String] = append(file, content, Charset.defaultCharset, log)
@@ -629,7 +655,7 @@ object FileUtilities
 	* A new file is created if it does not exist.*/
 	def append(file: File, content: String, charset: Charset, log: Logger): Option[String] =
 		write(file, content, charset, true, log)
-	
+
 	/** Writes the given <code>String content</code> to the provided <code>file</code> using the default encoding.
 	* If the file exists, it is overwritten.*/
 	def write(file: File, content: String, log: Logger): Option[String] = write(file, content, Charset.defaultCharset, log)
@@ -644,7 +670,7 @@ object FileUtilities
 		else
 			Some("String cannot be encoded by charset " + charset.name)
 	}
-	
+
 	/** Opens a <code>Writer</code> on the given file using the default encoding,
 	* passes it to the provided function, and closes the <code>Writer</code>.*/
 	def write(file: File, log: Logger)(f: Writer => Option[String]): Option[String] =
@@ -655,7 +681,7 @@ object FileUtilities
 		write(file, charset, false, log)(f)
 	private def write(file: File, charset: Charset, append: Boolean, log: Logger)(f: Writer => Option[String]): Option[String] =
 		fileWriter(charset, append).ioOption(file, Writing, log)(f)
-		
+
 	/** Opens a <code>Reader</code> on the given file using the default encoding,
 	* passes it to the provided function, and closes the <code>Reader</code>.*/
 	def read(file: File, log: Logger)(f: Reader => Option[String]): Option[String] =
@@ -672,14 +698,14 @@ object FileUtilities
 	* passes it to the provided function, and closes the <code>Reader</code>.*/
 	def readValue[R](file: File, charset: Charset, log: Logger)(f: Reader => Either[String, R]): Either[String, R] =
 		fileReader(charset).io(file, Reading, log)(f)
-		
+
 	/** Reads the contents of the given file into a <code>String</code> using the default encoding.
 	*  The resulting <code>String</code> is wrapped in <code>Right</code>.*/
 	def readString(file: File, log: Logger): Either[String, String] = readString(file, Charset.defaultCharset, log)
 	/** Reads the contents of the given file into a <code>String</code> using the given encoding.
 	*  The resulting <code>String</code> is wrapped in <code>Right</code>.*/
 	def readString(file: File, charset: Charset, log: Logger): Either[String, String] = readValue(file, charset, log)(readString)
-	
+
 	def readString(in: InputStream, log: Logger): Either[String, String] = readString(in, Charset.defaultCharset, log)
 	def readString(in: InputStream, charset: Charset, log: Logger): Either[String, String] =
 		streamReader.io((in, charset), Reading, log)(readString)
@@ -713,7 +739,7 @@ object FileUtilities
 		writeBytes(file, bytes, false, log)
 	private def writeBytes(file: File, bytes: Array[Byte], append: Boolean, log: Logger): Option[String] =
 		writeStream(file, append, log) { out => out.write(bytes); None }
-	
+
 	/** Reads the entire file into a byte array. */
 	def readBytes(file: File, log: Logger): Either[String, Array[Byte]] = readStreamValue(file, log)(readBytes)
 	def readBytes(in: InputStream, log: Logger): Either[String, Array[Byte]] =
@@ -736,7 +762,7 @@ object FileUtilities
 		readNext()
 		Right(out.toByteArray)
 	}
-		
+
 	/** Opens an <code>OutputStream</code> on the given file with append=true and passes the stream
 	* to the provided function.  The stream is closed before this function returns.*/
 	def appendStream(file: File, log: Logger)(f: OutputStream => Option[String]): Option[String] =
@@ -763,7 +789,7 @@ object FileUtilities
 	* to the provided function.  The stream is closed before this function returns.*/
 	def readStreamValue[R](url: URL, log: Logger)(f: InputStream => Either[String, R]): Either[String, R] =
 		urlInputStream.io(url, Reading, log)(f)
-		
+
 	/** Opens a <code>FileChannel</code> on the given file for writing and passes the channel
 	* to the given function.  The channel is closed before this function returns.*/
 	def writeChannel(file: File, log: Logger)(f: FileChannel => Option[String]): Option[String] =
@@ -776,13 +802,13 @@ object FileUtilities
 	* to the given function.  The channel is closed before this function returns.*/
 	def readChannelValue[R](file: File, log: Logger)(f: FileChannel => Either[String, R]): Either[String, R] =
 		fileInputChannel.io(file, Reading, log)(f)
-	
+
 	private[sbt] def wrapNull(a: Array[File]): Array[File] =
 		if(a == null)
 			new Array[File](0)
 		else
 			a
-			
+
 	/** Writes the given string to the writer followed by a newline.*/
 	private[sbt] def writeLine(writer: Writer, line: String)
 	{
@@ -793,7 +819,7 @@ object FileUtilities
 	def toFile(url: URL) =
 		try { new File(url.toURI) }
 		catch { case _: URISyntaxException => new File(url.getPath) }
-	
+
 	/** The directory in which temporary files are placed.*/
 	val temporaryDirectory = new File(System.getProperty("java.io.tmpdir"))
 	def classLocation(cl: Class[_]): URL =
@@ -805,11 +831,11 @@ object FileUtilities
 	def classLocationFile(cl: Class[_]): File = toFile(classLocation(cl))
 	def classLocation[T](implicit mf: scala.reflect.Manifest[T]): URL = classLocation(mf.erasure)
 	def classLocationFile[T](implicit mf: scala.reflect.Manifest[T]): File = classLocationFile(mf.erasure)
-	
+
 	lazy val scalaLibraryJar: File = classLocationFile[scala.ScalaObject]
 	lazy val scalaCompilerJar: File = classLocationFile[scala.tools.nsc.Settings]
 	def scalaJars: Iterable[File] = List(scalaLibraryJar, scalaCompilerJar)
-	
+
 	/** The producer of randomness for unique name generation.*/
 	private val random = new java.util.Random
 
@@ -861,7 +887,7 @@ private object OpenResource
 {
 	private def wrapEither[R](f: R => Option[String]): (R => Either[String, Unit]) = (r: R) => f(r).toLeft(())
 	private def unwrapEither(e: Either[String, Unit]): Option[String] = e.left.toOption
-	
+
 	def fileOutputStream(append: Boolean) =
 		new CloseableOpenFile[FileOutputStream] { protected def open(file: File) = new FileOutputStream(file, append) }
 	def fileInputStream = new CloseableOpenFile[FileInputStream]

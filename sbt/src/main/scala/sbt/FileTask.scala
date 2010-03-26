@@ -39,7 +39,6 @@ object FileTasks
 	implicit def wrapProduct(product: => Path): ProductsWrapper = wrapProducts(product :: Nil)
 	implicit def wrapProducts(productsList: => Iterable[Path]): ProductsWrapper =
   {
-    require(!productsList.isEmpty, "No products were specified; products must be known in advance.")
     new ProductsWrapper
 		{
 			def from(sourceFinder: PathFinder) =
@@ -62,6 +61,7 @@ object FileTasks
 	def apply[T](label: String, files: ProductsSources, log: Logger)(ifOutofdate: => T)(ifUptodate: => T): T =
 	{
 		val products = files.products
+    require(!products.isEmpty, "No products were specified; products must be known in advance.")
 		existenceCheck[T](label, products, log)(ifOutofdate)
 		{
 			val sources = files.sources

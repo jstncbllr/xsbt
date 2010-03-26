@@ -220,6 +220,9 @@ object FileUtilities
 	private def extract(from: ZipInputStream, toDirectory: Path, filter: NameFilter, log: Logger) =
 	{
 		val set = new scala.collection.mutable.HashSet[Path]
+    // don't touch dirs as we unzip because we don't know order of zip entires (any child will
+    // update the dir's time)
+		val dirTimes = new scala.collection.mutable.HashMap[Path, Long]
 		def next(): Option[String] =
 		{
 			val entry = from.getNextEntry
@@ -228,21 +231,23 @@ object FileUtilities
 			else
 			{
 				val name = entry.getName
-				val result =
+        val entryErr =
 					if(filter.accept(name))
 					{
 						val target = Path.fromString(toDirectory, name)
 						log.debug("Extracting zip entry '" + name + "' to '" + target + "'")
-						val result =
-							if(entry.isDirectory)
-								createDirectory(target, log)
-							else
-							{
-								set += target
-								writeStream(target.asFile, log) { out => FileUtilities.transfer(from, out, log) }
-							}
-						//target.asFile.setLastModified(entry.getTime)
-						result
+            if(entry.isDirectory)
+            {
+              dirTimes += target -> entry.getTime
+              createDirectory(target, log)
+            }
+            else
+              writeStream(target.asFile, log) { out => FileUtilities.transfer(from, out, log) } orElse
+              {
+                set += target
+                touchExisting(target.asFile, entry.getTime, log)
+                None
+              }
 					}
 					else
 					{
@@ -250,10 +255,12 @@ object FileUtilities
 						None
 					}
 				from.closeEntry()
-				result match { case None => next(); case x => x }
-			}
+				entryErr orElse next()
+      }
 		}
-		next().toLeft(readOnly(set))
+    val result = next()
+    for ((dir, time) <- dirTimes) touchExisting(dir.asFile, time, log)
+    result.toLeft(readOnly(set))
 	}
 
 	/** Copies all bytes from the given input stream to the given output stream.

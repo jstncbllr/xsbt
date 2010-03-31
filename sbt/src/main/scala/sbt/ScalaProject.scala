@@ -43,6 +43,8 @@ trait SimpleScalaProject extends ExecProject with Cleanable
 	case class CompileOption(val asString: String) extends ActionOption
 	case class JavaCompileOption(val asString: String) extends ActionOption
 
+	def compileOptions(asString: String*): Seq[CompileOption] = asString.map(CompileOption.apply)
+
 	val Deprecation = CompileOption(CompileOptions.Deprecation)
 	val ExplainTypes = CompileOption("-explaintypes")
 	val Optimize = CompileOption("-optimise")
@@ -302,16 +304,16 @@ trait ScalaProject extends SimpleScalaProject with FileTasks with MultiTaskProje
 			log.debug("Excluding tests: ")
 			excludeTestsSet.foreach(test => log.debug("\t" + test))
 		}
-		def includeTest(test: TestDefinition) = !excludeTestsSet.contains(test.testClassName) && testFilters.forall(filter => filter(test.testClassName))
-		val tests = HashSet.empty[TestDefinition] ++ analysis.allTests.filter(includeTest)
+		def includeTest(test: TestDefinition) = !excludeTestsSet.contains(test.name) && testFilters.forall(filter => filter(test.name))
+		val tests = HashSet.empty[TestDefinition] ++ analysis.allTests.map(_.toDefinition).filter(includeTest)
 		TestFramework.testTasks(frameworks, classpath.get, buildScalaInstance.loader, tests.toSeq, log,
 			testListeners.readOnly, false, setup.readOnly, cleanup.readOnly, testArgsByFramework)
 	}
 	private def flatten[T](i: Iterable[Iterable[T]]) = i.flatMap(x => x)
 
 	protected def testQuickMethod(testAnalysis: CompileAnalysis, options: => Seq[TestOption])(toRun: (Seq[TestOption]) => Task) = {
-    val analysis = testAnalysis.allTests.map(_.testClassName).toList
-		multiTask(analysis) { (args, includeFunction) =>
+		def analysis = Set() ++ testAnalysis.allTests.map(_.className)
+		multiTask(analysis.toList) { (args, includeFunction) =>
 			  toRun(TestArgument(args:_*) :: TestFilter(includeFunction) :: options.toList)
 		}
   }
@@ -326,7 +328,7 @@ trait WebScalaProject extends ScalaProject
 		packageTask(descendents(stagedWarPath ##, "*") --- ignore, outputWarPath, options)
 
 	@deprecated protected def prepareWebappTask(webappContents: PathFinder, warPath: => Path, classpath: PathFinder, extraJars: => Iterable[File]): Task =
-		prepareWebappTask(webappContents, warPath, classpath, Path.lazyPathFinder(extraJars.map(Path.fromFile)))
+		prepareWebappTask(webappContents, warPath, classpath, Path.finder(extraJars))
 	protected def prepareWebappTask(webappContents: PathFinder, warPath: => Path, classpath: PathFinder, extraJars: PathFinder): Task =
 		prepareWebappTask(webappContents, warPath, classpath, extraJars, Path.emptyPathFinder)
 	protected def prepareWebappTask(webappContents: PathFinder, warPath: => Path, classpath: PathFinder, extraJars: PathFinder, ignore: PathFinder): Task =
@@ -345,7 +347,7 @@ trait WebScalaProject extends ScalaProject
 			(copy(webappContents.get, warPath, log).right flatMap { copiedWebapp =>
 			copy(classesAndResources.get, classesTargetDirectory, log).right flatMap { copiedClasses =>
 			copyFlat(libs, webLibDirectory, log).right flatMap { copiedLibs =>
-			copyFilesFlat(extraJars.get.map(_.asFile), webLibDirectory, log).right flatMap { copiedExtraLibs =>
+			copyFilesFlat(extraJars.getFiles, webLibDirectory, log).right flatMap { copiedExtraLibs =>
 				{
 					val toRemove = scala.collection.mutable.HashSet(((warPath ** "*") --- ignore).get.toSeq : _*)
 					toRemove --= copiedWebapp

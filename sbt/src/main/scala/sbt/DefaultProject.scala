@@ -14,6 +14,7 @@ import ScalaProject.{optionsAsString, javaOptionsAsString}
 import java.io.File
 import java.net.URLClassLoader
 import java.util.jar.Attributes
+import scala.collection.mutable.ListBuffer
 
 /** This class defines concrete instances of actions from ScalaProject using overridable paths,
 * options, and configuration. */
@@ -110,7 +111,7 @@ abstract class BasicScalaProject extends ScalaProject with BasicDependencyProjec
 	* sbt.*/
 	override final def initializeDirectories()
 	{
-		FileUtilities.createDirectories(directoriesToCreate.map(_.asFile), log) match
+		FileUtilities.createDirectories(directoriesToCreate, log) match
 		{
 			case Some(errorMessage) => log.error("Could not initialize directory structure: " + errorMessage)
 			case None => log.success("Successfully initialized directory structure.")
@@ -165,7 +166,7 @@ abstract class BasicScalaProject extends ScalaProject with BasicDependencyProjec
 	protected def testUnmanagedClasspath = testCompilePath +++ testResourcesOutputPath  +++ testDependencies.scalaCompiler +++ runUnmanagedClasspath
 
 	/** @deprecated Use `mainDependencies.scalaJars`*/
-	@deprecated protected final def scalaJars: Iterable[File] = mainDependencies.scalaJars.get.map(_.asFile)
+	@deprecated protected final def scalaJars: Iterable[File] = mainDependencies.scalaJars.getFiles
 	/** An analysis of the jar dependencies of the main Scala sources.  It is only valid after main source compilation.
 	* See the LibraryDependencies class for details. */
 	final def mainDependencies = new LibraryDependencies(this, mainCompileConditional)
@@ -179,7 +180,7 @@ abstract class BasicScalaProject extends ScalaProject with BasicDependencyProjec
 	def testFrameworks: Seq[TestFramework] = 
 	{
 		import TestFrameworks.{JUnit, ScalaCheck, ScalaTest, Specs, ScalaCheckCompat, ScalaTestCompat, SpecsCompat}
-		ScalaCheck :: Specs :: ScalaTest :: JUnit :: ScalaCheckCompat :: ScalaTestCompat :: SpecsCompat :: Nil
+		ScalaCheck :: Specs :: ScalaTest :: ScalaCheckCompat :: ScalaTestCompat :: SpecsCompat :: JUnit :: Nil
 	}
 	/** The list of listeners for testing. */
 	def testListeners: Seq[TestReportListener] = TestLogger(log) :: Nil
@@ -197,12 +198,18 @@ abstract class BasicScalaProject extends ScalaProject with BasicDependencyProjec
 		def options = optionsAsString(baseCompileOptions.filter(!_.isInstanceOf[MaxCompileErrors]))
 		def maxErrors = maximumErrors(baseCompileOptions)
 		def compileOrder = BasicScalaProject.this.compileOrder
-		protected def testClassNames(frameworks: Seq[TestFramework]) = 
+		protected def fingerprints(frameworks: Seq[TestFramework]): TestFingerprints =
 		{
+			import org.scalatools.testing.{SubclassFingerprint, AnnotatedFingerprint}
 			val loader = TestFramework.createTestLoader(classpath.get, buildScalaInstance.loader)
-			def getTestNames(framework: TestFramework): Seq[String] =
-				framework.create(loader, log).toList.flatMap(_.tests.map(_.superClassName))
-			frameworks.flatMap(getTestNames)
+			val annotations = new ListBuffer[String]
+			val superclasses = new ListBuffer[String]
+			frameworks flatMap { _.create(loader, log) } flatMap(TestFramework.getTests) foreach {
+				case s: SubclassFingerprint => superclasses += s.superClassName
+				case a: AnnotatedFingerprint => annotations += a.annotationName
+				case _ => ()
+			}
+			TestFingerprints(superclasses.toList, annotations.toList)
 		}
 	}
 	class MainCompileConfig extends BaseCompileConfig
@@ -214,7 +221,7 @@ abstract class BasicScalaProject extends ScalaProject with BasicDependencyProjec
 		def outputDirectory = mainCompilePath
 		def classpath = compileClasspath
 		def analysisPath = mainAnalysisPath
-		def testDefinitionClassNames: Seq[String] = Nil
+		def testFingerprints = TestFingerprints(Nil, Nil)
 		def javaOptions = javaOptionsAsString(javaCompileOptions)
 	}
 	class TestCompileConfig extends BaseCompileConfig
@@ -226,7 +233,7 @@ abstract class BasicScalaProject extends ScalaProject with BasicDependencyProjec
 		def outputDirectory = testCompilePath
 		def classpath = testClasspath
 		def analysisPath = testAnalysisPath
-		def testDefinitionClassNames: Seq[String] = testClassNames(testFrameworks)
+		def testFingerprints = fingerprints(testFrameworks)
 		def javaOptions = javaOptionsAsString(testJavaCompileOptions)
 	}
 
@@ -372,7 +379,7 @@ abstract class BasicWebScalaProject extends BasicScalaProject with WebScalaProje
 			def contextPath = jettyContextPath
 			def classpathName = "test"
 			def parentLoader = buildScalaInstance.loader
-			def scanDirectories = p.scanDirectories.map(_.asFile)
+			def scanDirectories = Path.getFiles(p.scanDirectories).toSeq
 			def scanInterval = p.scanInterval
 			def port = jettyPort
 			def log = p.log
@@ -502,17 +509,17 @@ object BasicWebScalaProject
 final class LibraryDependencies(project: Project, conditional: CompileConditional) extends NotNull
 {
 	/** Library jars located in unmanaged or managed dependency paths.*/
-	def libraries: PathFinder = pathFinder(snapshot.libraries)
+	def libraries: PathFinder = Path.finder(snapshot.libraries)
 	/** Library jars located outside of the project.*/
-	def external: PathFinder = pathFinder(snapshot.external)
+	def external: PathFinder = Path.finder(snapshot.external)
 	/** The Scala library jar.*/
-	def scalaLibrary: PathFinder = pathFinder(snapshot.scalaLibrary)
+	def scalaLibrary: PathFinder = Path.finder(snapshot.scalaLibrary)
 	/** The Scala compiler jar.*/
-	def scalaCompiler: PathFinder = pathFinder(snapshot.scalaCompiler)
+	def scalaCompiler: PathFinder = Path.finder(snapshot.scalaCompiler)
 	/** All jar dependencies.*/
-	def all: PathFinder = pathFinder(snapshot.all)
+	def all: PathFinder = Path.finder(snapshot.all)
 	/** The Scala library and compiler jars.*/
-	def scalaJars: PathFinder = pathFinder(snapshot.scalaJars)
+	def scalaJars: PathFinder = Path.finder(snapshot.scalaJars)
 
 	/** Returns an object that has all analyzed dependency information frozen at the time of this method call. */
 	def snapshot = new Dependencies
@@ -531,8 +538,6 @@ final class LibraryDependencies(project: Project, conditional: CompileConditiona
 		def external = externalNoScala
 		def libraries = librariesNoScala
 	}
-
-	private def pathFinder(it: => Iterable[File]) = Path.lazyPathFinder(it.map(Path.fromFile))
 }
 private object LibraryDependencies
 {

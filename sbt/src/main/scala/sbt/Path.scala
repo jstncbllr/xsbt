@@ -6,7 +6,9 @@ package sbt
 import Path._
 import FileUtilities.wrapNull
 import java.io.File
-import scala.collection.mutable.{Set, HashSet}
+import java.net.URL
+import scala.collection.{immutable, mutable}
+import mutable.{Set, HashSet}
 
 /** A Path represents a file in a project.
 * @see sbt.PathFinder*/
@@ -54,6 +56,19 @@ sealed abstract class Path extends PathFinder with NotNull
 	def projectRelativePathString(separator: String): String
 	def absolutePath: String = asFile.getAbsolutePath
 	private[sbt] def prependTo(s: String): String
+	
+	/** The last component of this path.*/
+	def name = asFile.getName
+	/** The extension part of the name of this path.  This is the part of the name after the last period, or the empty string if there is no period.*/
+	def ext = baseAndExt._2
+	/** The base of the name of this path.  This is the part of the name before the last period, or the full name if there is no period.*/
+	def base = baseAndExt._1
+	def baseAndExt: (String, String) =
+	{
+		val nme = name
+		val dot = nme.lastIndexOf('.')
+		if(dot < 0) (nme, "") else (nme.substring(0, dot), nme.substring(dot+1))
+	}
 	
 	/** Equality of Paths is defined in terms of the underlying <code>File</code>.*/
 	override final def equals(other: Any) =
@@ -227,6 +242,12 @@ object Path
 	def fromFile(file: String): Path = fromFile(new File(file))
 	def fromFile(file: File): Path = new FilePath(file)
 	def fromFiles(files: Iterable[File]): Iterable[Path] =  files.map(fromFile)
+
+	// done this way because collection.Set.map returns Iterable that is Set underneath, so no need to create a new set
+	def mapSet[T](files: Iterable[Path])(f: Path => T): immutable.Set[T] =
+		files.map(f) match { case s: immutable.Set[T] => s; case x => immutable.Set() ++ x }
+	def getFiles(files: Iterable[Path]): immutable.Set[File] = mapSet(files)(_.asFile)
+	def getURLs(files: Iterable[Path]): Array[URL] = files.map(_.asURL).toSeq.toArray
 }
 
 /** A path finder constructs a set of paths.  The set is evaluated by a call to the <code>get</code>
@@ -274,9 +295,11 @@ sealed abstract class PathFinder extends NotNull
 	}
 	final def filter(f: Path => Boolean): PathFinder = Path.lazyPathFinder(get.filter(f))
 	final def flatMap(f: Path => PathFinder): PathFinder = Path.lazyPathFinder(get.flatMap(p => f(p).get))
-	final def getFiles: scala.collection.Set[File] = Set( get.map(_.asFile).toSeq : _*)
-	final def getPaths: scala.collection.Set[String] = Set( get.map(_.absolutePath).toSeq : _*)
-	final def getRelativePaths: scala.collection.Set[String] = Set( get.map(_.relativePath).toSeq : _*)
+	final def getURLs: Array[URL] = Path.getURLs(get)
+	final def getFiles: immutable.Set[File] = Path.getFiles(get)
+	final def getPaths: immutable.Set[String] = strictMap(_.absolutePath)
+	final def getRelativePaths: immutable.Set[String] = strictMap(_.relativePath)
+	final def strictMap[T](f: Path => T): immutable.Set[T] = Path.mapSet(get)(f)
 	private[sbt] def addTo(pathSet: Set[Path])
 
 	final def absString = Path.makeString(get)

@@ -17,14 +17,13 @@ sealed abstract class CompilerCore
 		apply(label, sources, classpath, outputDirectory, scalaOptions, Nil, CompileOrder.Mixed, log)
 	final def apply(label: String, sources: Iterable[Path], classpath: Iterable[Path], outputDirectory: Path, scalaOptions: Seq[String], javaOptions: Seq[String], order: CompileOrder.Value, log: Logger): Option[String] =
 	{
-			def filteredSources(extension: String) = sources.filter(_.asFile.getName.endsWith(extension))
-			def fileSet(sources: Iterable[Path]) = Set() ++ sources.map(_.asFile)
+			def filteredSources(extension: String) = sources.filter(_.name.endsWith(extension))
 			def process(label: String, sources: Iterable[_], act: => Unit) =
 				() => if(sources.isEmpty) log.debug("No " + label + " sources.") else act
 
-		val javaSources = fileSet(filteredSources(".java"))
-		val scalaSources = fileSet( if(order == CompileOrder.Mixed) sources else filteredSources(".scala") )
-		val classpathSet = fileSet(classpath)
+		val javaSources = Path.getFiles(filteredSources(".java"))
+		val scalaSources = Path.getFiles( if(order == CompileOrder.Mixed) sources else filteredSources(".scala") )
+		val classpathSet = Path.getFiles(classpath)
 		val scalaCompile = process("Scala", scalaSources, processScala(scalaSources, classpathSet, outputDirectory.asFile, scalaOptions, log) )
 		val javaCompile = process("Java", javaSources, processJava(javaSources, classpathSet, outputDirectory.asFile, javaOptions, log))
 		doCompile(label, sources, outputDirectory, order, log)(javaCompile, scalaCompile)
@@ -78,7 +77,8 @@ final class Compile(maximumErrors: Int, compiler: AnalyzingCompiler, analysisCal
 	}
 	protected def processJava(sources: Set[File], classpath: Set[File], outputDirectory: File, options: Seq[String], log: Logger)
 	{
-		val arguments = (new CompilerArguments(compiler.scalaInstance, false, compiler.compilerOnClasspath))(sources, classpath, outputDirectory, options)
+		val augmentedClasspath = if(compiler.autoBootClasspath) classpath + compiler.scalaInstance.libraryJar else classpath
+		val arguments = (new CompilerArguments(compiler.scalaInstance, false, compiler.compilerOnClasspath))(sources, augmentedClasspath, outputDirectory, options)
 		log.debug("Calling 'javac' with arguments:\n\t" + arguments.mkString("\n\t"))
 		def javac(argFile: File) = Process("javac", ("@" + normalizeSlash(argFile.getAbsolutePath)) :: Nil) ! log
 		val code = withArgumentFile(arguments)(javac)
@@ -118,7 +118,7 @@ final class Console(compiler: AnalyzingCompiler) extends NotNull
 		apply(classpath, "", log)
 	def apply(classpath: Iterable[Path], initialCommands: String, log: Logger): Option[String] =
 	{
-		def console0 = compiler.console(Set() ++ classpath.map(_.asFile), initialCommands, log)
+		def console0 = compiler.console(Path.getFiles(classpath), initialCommands, log)
 		JLine.withJLine( Run.executeTrapExit(console0, log) )
 	}
 }
@@ -127,16 +127,22 @@ private final class AnalysisInterface(delegate: AnalysisCallback, basePath: Path
 {
 	val outputPath = Path.fromFile(outputDirectory)
 	def superclassNames = delegate.superclassNames.toSeq.toArray[String]
+	def annotationNames = delegate.annotationNames.toSeq.toArray[String]
 	def superclassNotFound(superclassName: String) = delegate.superclassNotFound(superclassName)
 	def beginSource(source: File) = delegate.beginSource(srcPath(source))
+
 	def foundSubclass(source: File, subclassName: String, superclassName: String, isModule: Boolean) =
 		delegate.foundSubclass(srcPath(source), subclassName, superclassName, isModule)
+	def foundAnnotated(source: File, className: String, annotationName: String, isModule: Boolean) =
+		delegate.foundAnnotated(srcPath(source), className, annotationName, isModule)
+	def foundApplication(source: File, className: String) = delegate.foundApplication(srcPath(source), className)
+
 	def sourceDependency(dependsOn: File, source: File) =
 		delegate.sourceDependency(srcPath(dependsOn), srcPath(source))
 	def jarDependency(jar: File, source: File) = delegate.jarDependency(jar, srcPath(source))
 	def generatedClass(source: File, clazz: File) = delegate.generatedClass(srcPath(source), classPath(clazz))
 	def endSource(source: File) = delegate.endSource(srcPath(source))
-	def foundApplication(source: File, className: String) = delegate.foundApplication(srcPath(source), className)
+
 	def classDependency(clazz: File, source: File) =
 	{
 		val sourcePath = srcPath(source)

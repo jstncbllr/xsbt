@@ -188,9 +188,9 @@ object FileUtilities
 	/** Unzips the contents of the zip file <code>from</code> to the <code>toDirectory</code> directory.*/
 	def unzip(from: File, toDirectory: Path, log: Logger): Either[String, Set[Path]] =
 		unzip(from, toDirectory, AllPassFilter, log)
-  def unzip(from: InputStream, toDirectory: Path, log: Logger): Either[String, Set[Path]] =
-    unzip(from, toDirectory, AllPassFilter, log)
-  /** Unzips the contents of the zip file <code>from</code> to the <code>toDirectory</code> directory.*/
+	/** Unzips the contents of the zip file <code>from</code> to the <code>toDirectory</code> directory.*/
+	def unzip(from: InputStream, toDirectory: Path, log: Logger): Either[String, Set[Path]] =
+		unzip(from, toDirectory, AllPassFilter, log)
 	/** Unzips the contents of the zip file <code>from</code> to the <code>toDirectory</code> directory.*/
 	def unzip(from: URL, toDirectory: Path, log: Logger): Either[String, Set[Path]] =
 		unzip(from, toDirectory, AllPassFilter, log)
@@ -199,14 +199,10 @@ object FileUtilities
 	* Only the entries that match the given filter are extracted. */
 	def unzip(from: Path, toDirectory: Path, filter: NameFilter, log: Logger): Either[String, Set[Path]] =
 		unzip(from.asFile, toDirectory, filter, log)
-  /** Unzips the contents of the zip file <code>from</code> to the <code>toDirectory</code> directory.
-  * Only the entries that match the given filter are extracted. */
-  def unzip(from: File, toDirectory: Path, filter: NameFilter, log: Logger): Either[String, Set[Path]] =
-    readStreamValue(from, log)(in => unzip(in, toDirectory, filter, log))
-  /** Unzips the contents of the zip file <code>from</code> to the <code>toDirectory</code> directory.
-  * Only the entries that match the given filter are extracted. */
-  def unzip(from: File, toDirectory: Path, filter: NameFilter, preserveLastModified: Boolean, log: Logger): Either[String, Set[Path]] =
-    readStreamValue(from, log)(in => unzip(in, toDirectory, filter, preserveLastModified, log))
+	/** Unzips the contents of the zip file <code>from</code> to the <code>toDirectory</code> directory.
+	* Only the entries that match the given filter are extracted. */
+	def unzip(from: File, toDirectory: Path, filter: NameFilter, log: Logger): Either[String, Set[Path]] =
+		readStreamValue(from, log)(in => unzip(in, toDirectory, filter, log))
 	/** Unzips the contents of the zip file <code>from</code> to the <code>toDirectory</code> directory.
 	* Only the entries that match the given filter are extracted. */
 	def unzip(from: URL, toDirectory: Path, filter: NameFilter, log: Logger): Either[String, Set[Path]] =
@@ -214,20 +210,14 @@ object FileUtilities
 	/** Unzips the contents of the zip file <code>from</code> to the <code>toDirectory</code> directory.
 	* Only the entries that match the given filter are extracted. */
 	def unzip(from: InputStream, toDirectory: Path, filter: NameFilter, log: Logger): Either[String, Set[Path]] =
-    unzip(from, toDirectory, filter, false, log)
-  /** Unzips the contents of the zip file <code>from</code> to the <code>toDirectory</code> directory.
-	* Only the entries that match the given filter are extracted. */
-	def unzip(from: InputStream, toDirectory: Path, filter: NameFilter, preserveLastModified: Boolean, log: Logger): Either[String, Set[Path]] =
 	{
 		createDirectory(toDirectory, log) match
 		{
 			case Some(err) => Left(err)
-			case None => zipInputStream.io(from, "unzipping", log) {
-          zipInput => extract(zipInput, toDirectory, filter, preserveLastModified, log)
-      }
+			case None => zipInputStream.io(from, "unzipping", log) { zipInput => extract(zipInput, toDirectory, filter, log) }
 		}
 	}
-	private def extract(from: ZipInputStream, toDirectory: Path, filter: NameFilter, preserveLastModified: Boolean, log: Logger) =
+	private def extract(from: ZipInputStream, toDirectory: Path, filter: NameFilter, log: Logger) =
 	{
 		val set = new scala.collection.mutable.HashSet[Path]
     // don't touch dirs as we unzip because we don't know order of zip entires (any child will
@@ -248,14 +238,14 @@ object FileUtilities
 						log.debug("Extracting zip entry '" + name + "' to '" + target + "'")
             if(entry.isDirectory)
             {
-              if (preserveLastModified) dirTimes += target -> entry.getTime
+              dirTimes += target -> entry.getTime
               createDirectory(target, log)
             }
             else
               writeStream(target.asFile, log) { out => FileUtilities.transfer(from, out, log) } orElse
               {
                 set += target
-                 if (preserveLastModified) touchExisting(target.asFile, entry.getTime, log)
+                touchExisting(target.asFile, entry.getTime, log)
                 None
               }
 					}
@@ -269,7 +259,7 @@ object FileUtilities
       }
 		}
     val result = next()
-    if (preserveLastModified) for ((dir, time) <- dirTimes) touchExisting(dir.asFile, time, log)
+    for ((dir, time) <- dirTimes) touchExisting(dir.asFile, time, log)
     result.toLeft(readOnly(set))
 	}
 
